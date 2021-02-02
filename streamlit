@@ -1,0 +1,107 @@
+import requests
+from bs4 import BeautifulSoup
+from sentence_transformers import SentenceTransformer, util
+
+#distilbert-multilingual-nli-stsb-quora-ranking
+import seaborn as sns
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import streamlit as st
+#from translate import Translator
+
+st.title('Поисковик MAGESH')
+
+add_selectbox = st.sidebar.selectbox(
+    'Выберете нужную вам модель!',
+    ('Model 1', 'Model 2')
+)
+
+if add_selectbox == 'Model 1':
+  add_selectbox = 'distiluse-base-multilingual-cased'
+elif add_selectbox == 'Model 2':
+  add_selectbox = 'distilbert-multilingual-nli-stsb-quora-ranking'
+
+
+model = SentenceTransformer(add_selectbox)
+
+
+
+URL = 'https://aif.ru/news'
+HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:81.0) Gecko/20100101 Firefox/81.0',
+           'accept': '*/*'}
+
+hr = []
+news = []
+
+
+def get_href(html):
+    soup = BeautifulSoup(html, 'html.parser')
+    links = soup.find_all('div', class_='list_item')
+    for link in links:
+        h = link.find('a').get('href')
+        hr.append(h)
+    return hr
+
+
+def get_html(url, params=None):
+    r = requests.get(url, headers=HEADERS, params=params)
+    return r
+
+
+def get_content(html):
+    pr = []
+    soup = BeautifulSoup(html, 'html.parser')
+    cc = soup.find('div', class_='article_text').get_text()
+    pr.append(cc)
+    return pr
+href_article = []
+
+def parse():
+    html = get_html(URL)
+    href = get_href(html.text)
+    for i in range(len(href)):
+        html1 = get_html(href[i])
+        news.extend(get_content(html1.text))
+        href_article.append(href[i])
+    return news
+
+
+sentences1 = parse()
+st.write('Вы используете модель: ', add_selectbox)
+st.info('Введите слово или предложение, по которым вы хотите найти статью')
+sentences2 = st.text_input('Поиск по :','')
+
+#translator= Translator(from_lang="English",to_lang="Russian")
+
+#for j in range(len(sentences1)):
+#  sentences1[j] = translator.translate(sentences1[j])
+
+
+
+embeddings1 = model.encode(sentences1, convert_to_tensor=True)
+embeddings2 = model.encode(sentences2, convert_to_tensor=True)
+
+cosine_scores = util.pytorch_cos_sim(embeddings1, embeddings2)
+
+
+mas = [[0 for j in range(3)] for i in range(len(sentences1))]
+k = 1
+for i in range(len(sentences1)):
+    inti = "{:.4f}".format(cosine_scores[i][0])
+    #a = ' '.join(sentences1[i].split(' ')[:5])
+    mas[i][0] = float(inti)
+    mas[i][1] = sentences1[i] #+ '...'
+    mas[i][2] = k
+    #print('Href on article №' + str(i) + ' : ' + href_article[i])
+    k = k + 1
+mas_df = pd.DataFrame(mas, columns=['coef_similarity', 'text_input', 'num'])
+cols = ['coef_similarity', 'text_input']
+
+mas_df['coef_similarity'] = pd.to_numeric(mas_df['coef_similarity'], errors='coerce')
+mas_df = mas_df.sort_values('coef_similarity', ascending=False)
+
+if sentences2:
+  st.header('Чем больше "coef_similarity", тем больше вероятность того, что это нужный Вам текст')
+  st.success('Все прошло успешно!')
+  st.table(mas_df[cols])
